@@ -69,6 +69,40 @@ data class HomeSettings(
     val columns: Int = 3,
     val autoAddNewApps: Boolean = true,
     val wallpaper: Int = 0,
+    /** 丸アイコンなどを角丸の枠いっぱいにそろえる */
+    val shapeIcons: Boolean = true,
+)
+
+/**
+ * アイテムごとの見た目の変更。null の項目は元のまま。
+ * @param iconFile filesDir 内の写真アイコン（icons/xxx.png）
+ * @param textIcon 色と文字で作ったアイコンの文字（1〜2文字）
+ * @param shape 形をそろえるか（null = 全体の設定に従う）
+ */
+data class ItemStyle(
+    val label: String? = null,
+    val iconFile: String? = null,
+    val textIcon: String? = null,
+    val color: Int = 0,
+    val shape: Boolean? = null,
+) {
+    val isEmpty: Boolean get() = label == null && iconFile == null && textIcon == null && shape == null
+}
+
+internal fun ItemStyle.toJson(): JSONObject = JSONObject().apply {
+    label?.let { put("label", it) }
+    iconFile?.let { put("file", it) }
+    textIcon?.let { put("text", it) }
+    put("color", color)
+    shape?.let { put("shape", it) }
+}
+
+internal fun styleFromJson(o: JSONObject): ItemStyle = ItemStyle(
+    label = o.optString("label").takeIf { o.has("label") },
+    iconFile = o.optString("file").takeIf { o.has("file") },
+    textIcon = o.optString("text").takeIf { o.has("text") },
+    color = o.optInt("color", 0),
+    shape = if (o.has("shape")) o.optBoolean("shape") else null,
 )
 
 data class AppEntry(val pkg: String, val cls: String, val label: String) {

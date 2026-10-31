@@ -210,7 +210,7 @@ fun AllAppsPage(
                 ItemIcon(a.toItem(), 50.dp)
                 Spacer(Modifier.width(14.dp))
                 Text(
-                    a.label,
+                    HomeStore.styleOf(a.key)?.label ?: a.label,
                     style = OnWallpaper,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,

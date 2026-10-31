@@ -71,7 +71,7 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
     val currentKind = pages.getOrNull(pagerState.currentPage)?.kind
 
     val labels = remember(apps) { apps.associate { it.key to it.label } }
-    val labelFor: (HomeItem) -> String = { item ->
+    val defaultLabelFor: (HomeItem) -> String = { item ->
         when (item) {
             is HomeItem.App -> labels[item.key] ?: item.label
             is HomeItem.Shortcut -> item.label
@@ -79,6 +79,9 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
             is HomeItem.Widget -> "ウィジェット"
         }
     }
+    val styles = HomeStore.styles
+    val labelFor: (HomeItem) -> String = { item -> styles[item.key]?.label ?: defaultLabelFor(item) }
+    var iconEditFor by remember { mutableStateOf<HomeItem?>(null) }
 
     var moving by remember { mutableStateOf<Moving?>(null) }
     var menuFor by remember { mutableStateOf<Pair<Long, HomeItem>?>(null) }
@@ -216,9 +219,14 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
                 item = item,
                 label = labelFor(item),
                 onStartMove = { index -> moving = Moving(page.id, index) },
+                onEditIcon = { menuFor = null; iconEditFor = item },
                 onDismiss = { menuFor = null },
             )
         }
+    }
+
+    iconEditFor?.let { item ->
+        IconEditDialog(item, defaultLabelFor(item)) { iconEditFor = null }
     }
 
     addChooserFor?.let { pageId ->

@@ -130,12 +130,16 @@ fun ItemMenuDialog(
     item: HomeItem,
     label: String,
     onStartMove: (Int) -> Unit,
+    onEditIcon: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
     val title = if (item is HomeItem.Widget) widgetLabel(context, item.widgetId) else label
 
     BigDialog(title, onDismiss) {
+        if (item !is HomeItem.Widget) {
+            BigButton("アイコン・名前をかえる", onClick = onEditIcon)
+        }
         if (page.kind.let { it == PageKind.GRID || it == PageKind.DOCK }) {
             BigButton("うごかす（入れかえ）") {
                 val index = page.items.indexOfFirst { it?.key == item.key }
@@ -385,6 +389,17 @@ fun SettingsDialog(actions: HomeActions, onDismiss: () -> Unit) {
             )
         }
 
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 56.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text("アイコンの形をそろえる", fontSize = 18.sp, color = Ink)
+                Text("丸いアイコンも角丸いっぱいに表示します", fontSize = 14.sp, color = SubText)
+            }
+            Switch(
+                checked = s.shapeIcons,
+                onCheckedChange = { HomeStore.updateSettings(s.copy(shapeIcons = it)) },
+            )
+        }
+
         Text("ホームのページ", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         SubButton("＋ ホームのページを増やす") { HomeStore.addGridPage() }
         gridPages.drop(1).forEach { p ->
@@ -398,6 +413,6 @@ fun SettingsDialog(actions: HomeActions, onDismiss: () -> Unit) {
         Text("その他", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Ink)
         SubButton("元のホームにもどす") { actions.openHomeSettings() }
         SubButton("スマホの設定をひらく") { actions.openSystemSettings() }
-        Text("かんたんホーム 1.1", fontSize = 14.sp, color = SubText)
+        Text("かんたんホーム 1.2", fontSize = 14.sp, color = SubText)
     }
 }

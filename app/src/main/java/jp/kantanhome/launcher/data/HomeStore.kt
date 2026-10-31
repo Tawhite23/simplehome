@@ -20,6 +20,7 @@ object HomeStore {
     private const val PREFS = "kantan_home"
     private const val KEY_LAYOUT = "layout_v2"
     private const val KEY_SETTINGS = "settings_v1"
+    private const val KEY_STYLES = "styles_v1"
 
     private lateinit var appContext: Context
     private lateinit var prefs: SharedPreferences
@@ -33,6 +34,35 @@ object HomeStore {
         private set
     var settings: HomeSettings by mutableStateOf(HomeSettings())
         private set
+
+    /** アイコン・名前の変更（アイテムの key ごと） */
+    var styles: Map<String, ItemStyle> by mutableStateOf(emptyMap())
+        private set
+
+    fun styleOf(key: String): ItemStyle? = styles[key]
+
+    /** そのアイテムの形をそろえるか（アイテムごとの指定 → 全体の設定） */
+    fun shapeOf(key: String): Boolean = styles[key]?.shape ?: settings.shapeIcons
+
+    fun setStyle(key: String, style: ItemStyle?) {
+        val old = styles[key]
+        // 使わなくなった写真アイコンは消す
+        if (old?.iconFile != null && old.iconFile != style?.iconFile) {
+            runCatching { java.io.File(appContext.filesDir, old.iconFile).delete() }
+        }
+        styles = if (style == null || style.isEmpty) styles - key else styles + (key to style)
+        val o = JSONObject()
+        styles.forEach { (k, v) -> o.put(k, v.toJson()) }
+        prefs.edit().putString(KEY_STYLES, o.toString()).apply()
+    }
+
+    private fun loadStyles(): Map<String, ItemStyle> {
+        val raw = prefs.getString(KEY_STYLES, null) ?: return emptyMap()
+        return runCatching {
+            val o = JSONObject(raw)
+            o.keys().asSequence().associateWith { styleFromJson(o.getJSONObject(it)) }
+        }.getOrDefault(emptyMap())
+    }
 
     /** 左右にめくるページ（ドック以外） */
     val pagerPages: List<Page> get() = pages.filter { it.kind != PageKind.DOCK }
@@ -48,7 +78,8 @@ object HomeStore {
         launcherApps = appContext.getSystemService(LauncherApps::class.java)
         widgetHost = AppWidgetHost(appContext, WIDGET_HOST_ID)
         settings = loadSettings()
-        pages = loadPages() ?: defaultPages().also { savePages(it) }
+        styles = loadStyles()
+        pages =loadPages() ?: defaultPages().also { savePages(it) }
         launcherApps.registerCallback(packageCallback)
     }
 
@@ -170,6 +201,7 @@ object HomeStore {
             .put("columns", s.columns)
             .put("autoAdd", s.autoAddNewApps)
             .put("wallpaper", s.wallpaper)
+            .put("shapeIcons", s.shapeIcons)
             .toString()).apply()
     }
 
@@ -276,6 +308,7 @@ object HomeStore {
                 columns = o.optInt("columns", 3).coerceIn(2, 4),
                 autoAddNewApps = o.optBoolean("autoAdd", true),
                 wallpaper = o.optInt("wallpaper", 0),
+                shapeIcons = o.optBoolean("shapeIcons", true),
             )
         }.getOrDefault(HomeSettings())
     }

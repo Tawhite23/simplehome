@@ -53,7 +53,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import jp.kantanhome.launcher.data.HomeItem
+import jp.kantanhome.launcher.data.HomeStore
 import jp.kantanhome.launcher.data.IconCache
+import jp.kantanhome.launcher.data.ItemStyle
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -116,7 +118,8 @@ fun GlassChip(text: String, onClick: () -> Unit) {
     }
 }
 
-private val AvatarColors = listOf(
+/** 連絡先の丸や「色と文字」アイコンに使う色 */
+val IconColors = listOf(
     listOf(Color(0xFF6FB1FC), Color(0xFF2F6FD6)),
     listOf(Color(0xFFFF9A8B), Color(0xFFE0457B)),
     listOf(Color(0xFF8BE3A0), Color(0xFF2E9E5B)),
@@ -127,39 +130,54 @@ private val AvatarColors = listOf(
 
 /** iPhone の連絡先のような丸いアイコン（名前の1文字目） */
 @Composable
-fun Avatar(name: String, size: Dp) {
-    val colors = AvatarColors[(name.hashCode() and 0x7fffffff) % AvatarColors.size]
-    val textSize = with(LocalDensity.current) { (size * 0.42f).toSp() }
+fun Avatar(name: String, size: Dp) =
+    TextIcon(name.take(1), (name.hashCode() and 0x7fffffff) % IconColors.size, size, CircleShape)
+
+/** 色のグラデーションに文字をのせたアイコン */
+@Composable
+fun TextIcon(text: String, colorIndex: Int, size: Dp, shape: Shape) {
+    val colors = IconColors[colorIndex.mod(IconColors.size)]
+    val textSize = with(LocalDensity.current) { (size * if (text.length > 1) 0.34f else 0.44f).toSp() }
     Box(
         Modifier
             .size(size)
-            .shadow(4.dp, CircleShape)
-            .background(Brush.verticalGradient(colors), CircleShape),
+            .shadow(4.dp, shape)
+            .background(Brush.verticalGradient(colors), shape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(name.take(1), color = Color.White, fontSize = textSize, fontWeight = FontWeight.SemiBold)
+        Text(text, color = Color.White, fontSize = textSize, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
+/**
+ * アイテムのアイコン。変更（写真・色と文字）があればそれを使う。
+ * 連絡先は丸、アプリとWebは角丸。
+ */
 @Composable
-fun ItemIcon(item: HomeItem, size: Dp) {
-    if (item is HomeItem.Contact) {
+fun ItemIcon(item: HomeItem, size: Dp, style: ItemStyle? = HomeStore.styleOf(item.key)) {
+    val shape = if (item is HomeItem.Contact) CircleShape else iconShape(size)
+    style?.textIcon?.let {
+        TextIcon(it, style.color, size, shape)
+        return
+    }
+    if (item is HomeItem.Contact && style?.iconFile == null) {
         Avatar(item.name, size)
         return
     }
     val context = LocalContext.current
     val px = with(LocalDensity.current) { size.roundToPx() }
-    val bitmap: ImageBitmap? by produceState(IconCache.peek(item.key), item.key) {
-        if (value == null) value = IconCache.load(context, item, px)
+    val fill = style?.shape ?: HomeStore.settings.shapeIcons
+    val key = IconCache.cacheKey(item, style, fill)
+    val bitmap: ImageBitmap? by produceState(IconCache.peek(key), key) {
+        if (value == null) value = IconCache.load(context, item, style, fill, px)
     }
-    val shape = iconShape(size)
     val b = bitmap
     Box(
         Modifier
             .size(size)
             .shadow(4.dp, shape)
             .clip(shape)
-            .background(Color.White),
+            .background(if (fill || style?.iconFile != null) Color.White else Color.Transparent),
     ) {
         if (b != null) Image(bitmap = b, contentDescription = null, modifier = Modifier.size(size))
     }
