@@ -13,7 +13,9 @@ import android.provider.ContactsContract
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.mutableIntStateOf
 import jp.kantanhome.launcher.data.AppCatalog
@@ -61,6 +63,10 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
         HomeStore.init(this)
         AppCatalog.refresh(this)
@@ -126,10 +132,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun addContactFrom(uri: Uri) {
-        val pageId = pendingContactPageId
-            ?: HomeStore.pages.firstOrNull { it.kind == PageKind.CONTACTS }?.id
-            ?: return
+        val pageId = pendingContactPageId ?: HomeStore.dock?.id ?: return
         pendingContactPageId = null
+        val isDock = HomeStore.pages.find { it.id == pageId }?.kind == PageKind.DOCK
         // 電話番号データの URI は一時的に読める権限付きで返ってくるので、READ_CONTACTS は不要
         runCatching {
             contentResolver.query(uri, arrayOf("display_name", "data1"), null, null, null)?.use { c ->
@@ -137,8 +142,13 @@ class MainActivity : ComponentActivity() {
                     val number = c.getString(1)?.trim().orEmpty()
                     val name = c.getString(0)?.trim().orEmpty().ifBlank { number }
                     if (number.isNotEmpty()) {
-                        if (HomeStore.addItem(pageId, HomeItem.Contact(name, number))) toast("「$name」をついかしました")
-                        else toast("もう入っています")
+                        val item = HomeItem.Contact(name, number)
+                        when {
+                            HomeStore.addItem(pageId, item) -> toast("「$name」をついかしました")
+                            HomeStore.contains(pageId, item.key) -> toast("もう入っています")
+                            isDock -> toast("下の4つがいっぱいです。どれかを外してください")
+                            else -> toast("ついかできませんでした")
+                        }
                     }
                 }
             }

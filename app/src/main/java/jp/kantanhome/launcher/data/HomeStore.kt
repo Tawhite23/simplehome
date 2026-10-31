@@ -18,7 +18,7 @@ import org.json.JSONObject
 object HomeStore {
     const val WIDGET_HOST_ID = 2026
     private const val PREFS = "kantan_home"
-    private const val KEY_LAYOUT = "layout_v1"
+    private const val KEY_LAYOUT = "layout_v2"
     private const val KEY_SETTINGS = "settings_v1"
 
     private lateinit var appContext: Context
@@ -33,6 +33,10 @@ object HomeStore {
         private set
     var settings: HomeSettings by mutableStateOf(HomeSettings())
         private set
+
+    /** 左右にめくるページ（ドック以外） */
+    val pagerPages: List<Page> get() = pages.filter { it.kind != PageKind.DOCK }
+    val dock: Page? get() = pages.firstOrNull { it.kind == PageKind.DOCK }
 
     private var initialized = false
 
@@ -49,17 +53,21 @@ object HomeStore {
     }
 
     // ------------------------------------------------------------------
-    // 追加・削除・移動
+    // 追加・削除・入れ替え
     // ------------------------------------------------------------------
 
     fun contains(pageId: Long, key: String): Boolean =
         pages.find { it.id == pageId }?.items?.any { it?.key == key } == true
 
-    /** GRID は最初の空きマスに入れる（なければ末尾）。それ以外は末尾に足す。 */
+    /**
+     * GRID / DOCK は最初の空きマスに入れる（GRID は空きがなければ末尾）。
+     * ドックが4枠ともうまっているときは入れられない（false）。
+     */
     fun addItem(pageId: Long, item: HomeItem): Boolean {
         val page = pages.find { it.id == pageId } ?: return false
         if (!page.kind.accepts(item) || contains(pageId, item.key)) return false
-        update(pages.map { if (it.id == pageId) it.copy(items = placeIn(it, item)) else it })
+        val placed = placeIn(page, item) ?: return false
+        update(pages.map { if (it.id == pageId) it.copy(items = placed) else it })
         return true
     }
 
@@ -68,7 +76,7 @@ object HomeStore {
         return addItem(id, item)
     }
 
-    /** GRID では空きマスにするだけで、ほかのアイコンは動かさない。 */
+    /** GRID / DOCK では空きマスにするだけで、ほかのアイコンは動かさない。 */
     fun removeItem(pageId: Long, item: HomeItem) {
         update(pages.map { if (it.id == pageId) it.copy(items = takeOut(it, item.key)) else it })
         cleanup(item)
@@ -76,41 +84,43 @@ object HomeStore {
 
     /**
      * マスの入れ替え。from のアイコンを to へ、to にあったもの（空きなら空き）を from へ。
-     * 別の GRID ページ同士でも入れ替えられる。周りのアイコンは動かない。
+     * ホームの別ページ同士、ホームとドックの間でも入れ替えられる。周りのアイコンは動かない。
      */
-    fun swapSlots(fromPageId: Long, fromIndex: Int, toPageId: Long, toIndex: Int) {
-        val from = pages.find { it.id == fromPageId } ?: return
-        val to = pages.find { it.id == toPageId } ?: return
-        if (from.kind != PageKind.GRID || to.kind != PageKind.GRID) return
-        if (fromPageId == toPageId && fromIndex == toIndex) return
-        val moving = from.items.getOrNull(fromIndex) ?: return
+    fun swapSlots(fromPageId: Long, fromIndex: Int, toPageId: Long, toIndex: Int): Boolean {
+        val from = pages.find { it.id == fromPageId } ?: return false
+        val to = pages.find { it.id == toPageId } ?: return false
+        if (!from.kind.isSlots || !to.kind.isSlots) return false
+        if (toIndex < 0 || toIndex >= capacity(to)) return false
+        if (fromPageId == toPageId && fromIndex == toIndex) return false
+        val moving = from.items.getOrNull(fromIndex) ?: return false
 
         if (fromPageId == toPageId) {
             val list = from.items.padTo(maxOf(fromIndex, toIndex) + 1)
-            val other = list[toIndex]
+            list[fromIndex] = list[toIndex]
             list[toIndex] = moving
-            list[fromIndex] = other
             update(pages.map { if (it.id == fromPageId) it.copy(items = list.trimEnd()) else it })
-        } else {
-            val target = to.items.padTo(toIndex + 1)
-            val other = target[toIndex]
-            // 別ページに同じものが既にあるなら重複させない
-            if (target.any { it?.key == moving.key }) return
-            if (other != null && from.items.any { it?.key == other.key && it !== moving }) return
-            target[toIndex] = moving
-            val source = from.items.toMutableList()
-            source[fromIndex] = other
-            update(pages.map {
-                when (it.id) {
-                    fromPageId -> it.copy(items = source.trimEnd())
-                    toPageId -> it.copy(items = target.trimEnd())
-                    else -> it
-                }
-            })
+            return true
         }
+
+        val target = to.items.padTo(toIndex + 1)
+        val other = target[toIndex]
+        // 同じページに同じものが2つにならないようにする
+        if (target.withIndex().any { (i, x) -> i != toIndex && x?.key == moving.key }) return false
+        if (other != null && from.items.withIndex().any { (i, x) -> i != fromIndex && x?.key == other.key }) return false
+        target[toIndex] = moving
+        val source = from.items.toMutableList()
+        source[fromIndex] = other
+        update(pages.map {
+            when (it.id) {
+                fromPageId -> it.copy(items = source.trimEnd())
+                toPageId -> it.copy(items = target.trimEnd())
+                else -> it
+            }
+        })
+        return true
     }
 
-    /** リスト型ページ（でんわ・べんり）の並べ替え用：前後に1つずらす */
+    /** ウィジェットページの並べ替え用：前後に1つずらす */
     fun moveInList(pageId: Long, key: String, delta: Int) {
         update(pages.map { p ->
             if (p.id != pageId) return@map p
@@ -124,20 +134,6 @@ object HomeStore {
                 p.copy(items = list)
             }
         })
-    }
-
-    /** 種類の違うページへ移す（例：連絡先を「でんわ」から「ホーム」へ） */
-    fun moveToPage(fromPageId: Long, item: HomeItem, toPageId: Long): Boolean {
-        val target = pages.find { it.id == toPageId } ?: return false
-        if (!target.kind.accepts(item) || contains(toPageId, item.key)) return false
-        update(pages.map {
-            when (it.id) {
-                fromPageId -> it.copy(items = takeOut(it, item.key))
-                toPageId -> it.copy(items = placeIn(it, item))
-                else -> it
-            }
-        })
-        return true
     }
 
     fun resizeWidget(pageId: Long, widgetId: Int, deltaDp: Int) {
@@ -158,7 +154,7 @@ object HomeStore {
         update(pages.toMutableList().apply { add(insertAt, Page(nextId, PageKind.GRID, "ホーム$n")) })
     }
 
-    /** 2枚目以降の GRID ページで、中身が空のときだけ消せる */
+    /** 2枚目以降のホームページで、中身が空のときだけ消せる */
     fun removePage(pageId: Long): Boolean {
         val p = pages.find { it.id == pageId } ?: return false
         val firstGrid = pages.firstOrNull { it.kind == PageKind.GRID }?.id
@@ -173,6 +169,7 @@ object HomeStore {
             .put("fontScale", s.fontScale.toDouble())
             .put("columns", s.columns)
             .put("autoAdd", s.autoAddNewApps)
+            .put("wallpaper", s.wallpaper)
             .toString()).apply()
     }
 
@@ -186,16 +183,22 @@ object HomeStore {
     // 内部処理
     // ------------------------------------------------------------------
 
-    private fun placeIn(page: Page, item: HomeItem): List<HomeItem?> {
-        if (page.kind != PageKind.GRID) return page.filled + item
-        val list = page.items.toMutableList()
+    private fun capacity(p: Page): Int = if (p.kind == PageKind.DOCK) DOCK_SIZE else Int.MAX_VALUE
+
+    private fun placeIn(page: Page, item: HomeItem): List<HomeItem?>? {
+        if (!page.kind.isSlots) return page.filled + item
+        val list = page.items.padTo(if (page.kind == PageKind.DOCK) DOCK_SIZE else 0)
         val empty = list.indexOfFirst { it == null }
-        if (empty >= 0) list[empty] = item else list.add(item)
-        return list
+        when {
+            empty >= 0 -> list[empty] = item
+            page.kind == PageKind.DOCK -> return null
+            else -> list.add(item)
+        }
+        return list.trimEnd()
     }
 
     private fun takeOut(page: Page, key: String): List<HomeItem?> =
-        if (page.kind == PageKind.GRID) page.items.map { if (it?.key == key) null else it }.trimEnd()
+        if (page.kind.isSlots) page.items.map { if (it?.key == key) null else it }.trimEnd()
         else page.items.filter { it != null && it.key != key }
 
     private fun cleanup(item: HomeItem) {
@@ -241,11 +244,11 @@ object HomeStore {
 
     private fun loadPages(): List<Page>? {
         val raw = prefs.getString(KEY_LAYOUT, null) ?: return null
-        return runCatching {
+        val loaded = runCatching {
             val arr = JSONArray(raw)
-            (0 until arr.length()).map { i ->
+            (0 until arr.length()).mapNotNull { i ->
                 val o = arr.getJSONObject(i)
-                val kind = PageKind.valueOf(o.getString("kind"))
+                val kind = runCatching { PageKind.valueOf(o.getString("kind")) }.getOrNull() ?: return@mapNotNull null
                 val itemsArr = o.optJSONArray("items") ?: JSONArray()
                 val items = (0 until itemsArr.length()).map { j ->
                     if (itemsArr.isNull(j)) null else itemFromJson(itemsArr.getJSONObject(j))
@@ -254,10 +257,14 @@ object HomeStore {
                     id = o.getLong("id"),
                     kind = kind,
                     title = o.getString("title"),
-                    items = if (kind == PageKind.GRID) items.trimEnd() else items.filterNotNull(),
+                    items = if (kind.isSlots) items.trimEnd() else items.filterNotNull(),
                 )
             }
-        }.getOrNull()?.takeIf { list -> list.any { it.kind == PageKind.GRID } }
+        }.getOrNull() ?: return null
+        if (loaded.none { it.kind == PageKind.GRID }) return null
+        if (loaded.any { it.kind == PageKind.DOCK }) return loaded
+        val nextId = (loaded.maxOfOrNull { it.id } ?: 0L) + 1
+        return loaded + Page(nextId, PageKind.DOCK, "よく連絡する人")
     }
 
     private fun loadSettings(): HomeSettings {
@@ -268,6 +275,7 @@ object HomeStore {
                 fontScale = o.optDouble("fontScale", 1.15).toFloat(),
                 columns = o.optInt("columns", 3).coerceIn(2, 4),
                 autoAddNewApps = o.optBoolean("autoAdd", true),
+                wallpaper = o.optInt("wallpaper", 0),
             )
         }.getOrDefault(HomeSettings())
     }
@@ -287,10 +295,10 @@ object HomeStore {
         )
         val items = candidates.filterNotNull().distinct().mapNotNull { appItemFor(it) }
         return listOf(
-            Page(1, PageKind.CONTACTS, "でんわ"),
+            Page(1, PageKind.WIDGETS, "ウィジェット"),
             Page(2, PageKind.GRID, "ホーム", items),
-            Page(3, PageKind.WIDGETS, "べんり"),
-            Page(4, PageKind.ALL_APPS, "アプリ"),
+            Page(3, PageKind.ALL_APPS, "アプリ"),
+            Page(4, PageKind.DOCK, "よく連絡する人"),
         )
     }
 
@@ -300,9 +308,9 @@ object HomeStore {
             if (user != Process.myUserHandle()) return
             // 消えたアプリのマスは空きにするだけ（詰めない）
             update(pages.map { p ->
-                if (p.kind == PageKind.GRID)
+                if (p.kind.isSlots)
                     p.copy(items = p.items.map { if (it?.packageName == packageName) null else it }.trimEnd())
-                else p.copy(items = p.items.filter { it?.packageName != packageName })
+                else p
             })
         }
 

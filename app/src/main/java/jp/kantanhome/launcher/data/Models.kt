@@ -2,10 +2,18 @@ package jp.kantanhome.launcher.data
 
 import org.json.JSONObject
 
-/** ページの種類。シンプルホームの「連絡先／メイン／アプリ／ウィジェット」の分け方をベースにしている。 */
-enum class PageKind { CONTACTS, GRID, WIDGETS, ALL_APPS }
+/**
+ * ページの種類。iPhone のホームに合わせて
+ *  左端 = ウィジェット（iPhone の「今日の表示」）
+ *  まん中 = ホーム（何枚でも）
+ *  右端 = アプリ一覧（iPhone の「アプリライブラリ」）
+ * DOCK は画面下の「よく連絡する人」の4枠。ページとしては表示しない。
+ */
+enum class PageKind { GRID, DOCK, WIDGETS, ALL_APPS }
 
-/** ホームに置けるもの。GRID ページにはアプリ・Webショートカット・連絡先を混ぜて置ける。 */
+const val DOCK_SIZE = 4
+
+/** ホームに置けるもの。GRID とドックには、アプリ・Webショートカット・連絡先を混ぜて置ける。 */
 sealed interface HomeItem {
     val key: String
 
@@ -34,17 +42,18 @@ val HomeItem.packageName: String?
         else -> null
     }
 
-/** 移動先として受け入れられるか */
+/** マス目で並ぶページ（入れ替えができるところ） */
+val PageKind.isSlots: Boolean get() = this == PageKind.GRID || this == PageKind.DOCK
+
 fun PageKind.accepts(item: HomeItem): Boolean = when (item) {
     is HomeItem.Widget -> this == PageKind.WIDGETS
-    is HomeItem.Contact -> this == PageKind.GRID || this == PageKind.CONTACTS
-    else -> this == PageKind.GRID
+    else -> isSlots
 }
 
 /**
- * items は「マス」の並び。GRID ページでは null = 空きマス。
- * 外したり入れ替えたりしても自動で詰めない（空きはそのまま残る）。
- * CONTACTS / WIDGETS ページは普通のリストで null は入らない。
+ * items は「マス」の並び。GRID / DOCK では null = 空きマス。
+ * 入れ替えや取り外しで自動的に詰めたり整列したりはしない。
+ * WIDGETS は普通のリストで null は入らない。
  */
 data class Page(
     val id: Long,
@@ -59,6 +68,7 @@ data class HomeSettings(
     val fontScale: Float = 1.15f,
     val columns: Int = 3,
     val autoAddNewApps: Boolean = true,
+    val wallpaper: Int = 0,
 )
 
 data class AppEntry(val pkg: String, val cls: String, val label: String) {

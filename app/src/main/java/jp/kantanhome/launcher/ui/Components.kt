@@ -32,12 +32,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,13 +59,14 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-private val CardShape = RoundedCornerShape(18.dp)
+/** iPhone のアイコンに近い角の丸さ（一辺の約 22%） */
+fun iconShape(size: Dp): Shape = RoundedCornerShape(size * 0.225f)
 
-@Composable
-fun Modifier.card(): Modifier = this
-    .clip(CardShape)
-    .background(MaterialTheme.colorScheme.surface)
-    .border(1.dp, Color(0x22000000), CardShape)
+/** すりガラス風の面。背景ぼかしは使わず、半透明の白とふちの光で表現する。 */
+fun Modifier.glass(shape: Shape, alpha: Float = 0.22f): Modifier = this
+    .clip(shape)
+    .background(Color.White.copy(alpha = alpha))
+    .border(1.dp, Color.White.copy(alpha = 0.35f), shape)
 
 @Composable
 fun BigButton(
@@ -72,14 +81,14 @@ fun BigButton(
         onClick = onClick,
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 60.dp),
-        shape = RoundedCornerShape(14.dp),
+            .heightIn(min = 58.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (color == Color.Unspecified) scheme.primary else color,
             contentColor = if (contentColor == Color.Unspecified) scheme.onPrimary else contentColor,
         ),
     ) {
-        Text(text, fontSize = 20.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Text(text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
     }
 }
 
@@ -89,40 +98,46 @@ fun SubButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) 
         text = text,
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        contentColor = Blue,
         onClick = onClick,
     )
 
+/** 壁紙の上に置く小さめのガラスボタン */
 @Composable
-fun SmallChip(text: String, onClick: () -> Unit) {
+fun GlassChip(text: String, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(50)
     Box(
         Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.primary)
+            .glass(shape, 0.28f)
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
-        Text(text, color = MaterialTheme.colorScheme.onPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text(text, style = OnWallpaper, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 private val AvatarColors = listOf(
-    Color(0xFF2E7D32), Color(0xFF1565C0), Color(0xFFAD1457),
-    Color(0xFFEF6C00), Color(0xFF6A1B9A), Color(0xFF00838F),
+    listOf(Color(0xFF6FB1FC), Color(0xFF2F6FD6)),
+    listOf(Color(0xFFFF9A8B), Color(0xFFE0457B)),
+    listOf(Color(0xFF8BE3A0), Color(0xFF2E9E5B)),
+    listOf(Color(0xFFFFC371), Color(0xFFF07B2B)),
+    listOf(Color(0xFFC3A6FF), Color(0xFF7D4FD6)),
+    listOf(Color(0xFF7FE0E6), Color(0xFF1F98A6)),
 )
 
+/** iPhone の連絡先のような丸いアイコン（名前の1文字目） */
 @Composable
 fun Avatar(name: String, size: Dp) {
-    val color = AvatarColors[(name.hashCode() and 0x7fffffff) % AvatarColors.size]
-    val textSize = with(LocalDensity.current) { (size * 0.45f).toSp() }
+    val colors = AvatarColors[(name.hashCode() and 0x7fffffff) % AvatarColors.size]
+    val textSize = with(LocalDensity.current) { (size * 0.42f).toSp() }
     Box(
         Modifier
             .size(size)
-            .clip(CircleShape)
-            .background(color),
+            .shadow(4.dp, CircleShape)
+            .background(Brush.verticalGradient(colors), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(name.take(1), color = Color.White, fontSize = textSize, fontWeight = FontWeight.Bold)
+        Text(name.take(1), color = Color.White, fontSize = textSize, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -137,101 +152,131 @@ fun ItemIcon(item: HomeItem, size: Dp) {
     val bitmap: ImageBitmap? by produceState(IconCache.peek(item.key), item.key) {
         if (value == null) value = IconCache.load(context, item, px)
     }
+    val shape = iconShape(size)
     val b = bitmap
-    if (b != null) {
-        Image(bitmap = b, contentDescription = null, modifier = Modifier.size(size))
-    } else {
-        Box(
-            Modifier
-                .size(size)
-                .clip(RoundedCornerShape(size / 4))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-        )
-    }
-}
-
-@Composable
-fun AddIcon(size: Dp) {
-    val textSize = with(LocalDensity.current) { (size * 0.6f).toSp() }
     Box(
         Modifier
             .size(size)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary),
-        contentAlignment = Alignment.Center,
+            .shadow(4.dp, shape)
+            .clip(shape)
+            .background(Color.White),
     ) {
-        Text("＋", color = Color.White, fontSize = textSize, fontWeight = FontWeight.Bold)
+        if (b != null) Image(bitmap = b, contentDescription = null, modifier = Modifier.size(size))
     }
 }
 
-/** ホームの1マス。ラベルは常に2行分の高さを取るので、マスの高さがそろう。 */
+/** ホームの1つ分：アイコン＋白い名前。カードの枠はなし（iPhone と同じ）。 */
 @Composable
-fun Tile(
+fun HomeIcon(
     label: String,
+    iconSize: Dp,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
-    highlight: Boolean = false,
+    selected: Boolean = false,
+    showLabel: Boolean = true,
     icon: @Composable () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
+    val haptic = LocalHapticFeedback.current
     Column(
         modifier
             .fillMaxWidth()
-            .clip(CardShape)
-            .background(if (highlight) Color(0xFFFFF3C4) else scheme.surface)
-            .border(if (highlight) 3.dp else 1.dp, if (highlight) Color(0xFFE0A100) else Color(0x22000000), CardShape)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(vertical = 14.dp, horizontal = 6.dp),
+            .clip(RoundedCornerShape(20.dp))
+            .then(if (selected) Modifier.glass(RoundedCornerShape(20.dp), 0.35f) else Modifier)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            )
+            .padding(vertical = 8.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         icon()
-        Spacer(Modifier.height(8.dp))
-        Text(
-            label,
-            fontSize = 17.sp,
-            lineHeight = 21.sp,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            minLines = 2,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            color = scheme.onSurface,
-        )
+        if (showLabel) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                label,
+                style = OnWallpaper,
+                fontSize = 15.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
-/**
- * 空きマス。ふだんは見えない（場所だけ取る）。
- * 移動中は「ここへ」と表示して、押すとそこへ動かせる。
- */
+/** 点線のマス。空きマスの「ここへ」や、ドックの「＋」に使う。 */
 @Composable
-fun EmptySlot(iconSize: Dp, active: Boolean, onClick: () -> Unit) {
-    val shape = CardShape
-    val base = Modifier
-        .fillMaxWidth()
-        .clip(shape)
-    val mod = if (active) {
-        base
-            .background(Color(0xFFEFF4FB))
-            .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f), shape)
+fun DashedSlot(
+    iconSize: Dp,
+    text: String,
+    circle: Boolean,
+    showLabel: Boolean = true,
+    onClick: () -> Unit,
+) {
+    val radius = if (circle) iconSize / 2 else iconSize * 0.225f
+    val textSize = with(LocalDensity.current) { (iconSize * 0.42f).toSp() }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
-    } else base
-    Box(mod.padding(vertical = 14.dp, horizontal = 6.dp), contentAlignment = Alignment.Center) {
-        // Tile と同じ高さにするための見えない中身
-        Column(Modifier.alpha(0f), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.size(iconSize))
-            Spacer(Modifier.height(8.dp))
-            Text(" ", fontSize = 17.sp, lineHeight = 21.sp, minLines = 2, maxLines = 2)
+            .padding(vertical = 8.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(iconSize)
+                .clip(RoundedCornerShape(radius))
+                .background(Color.White.copy(alpha = 0.14f))
+                .drawBehind {
+                    drawRoundRect(
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = Stroke(
+                            width = 2.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f)),
+                        ),
+                        cornerRadius = CornerRadius(radius.toPx()),
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("＋", style = OnWallpaper, fontSize = textSize, fontWeight = FontWeight.Light)
         }
-        if (active) {
-            Text("ここへ", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        if (showLabel) {
+            Spacer(Modifier.height(6.dp))
+            Text(text, style = OnWallpaper, fontSize = 15.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
 
+/** 空きマス。ふだんは見えない。入れ替え中だけ「ここへ」と出る。 */
 @Composable
-fun ClockHeader() {
+fun EmptySlot(iconSize: Dp, active: Boolean, circle: Boolean = false, onClick: () -> Unit) {
+    if (active) {
+        DashedSlot(iconSize, "ここへ", circle, onClick = onClick)
+    } else {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp, horizontal = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.size(iconSize))
+            Spacer(Modifier.height(6.dp))
+            Text(" ", fontSize = 15.sp, lineHeight = 19.sp)
+        }
+    }
+}
+
+/** iPhone の時計ウィジェット風。大きめの時刻と日付。 */
+@Composable
+fun ClockWidget() {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -241,15 +286,17 @@ fun ClockHeader() {
         }
     }
     val time = remember(now) { now.format(DateTimeFormatter.ofPattern("H:mm")) }
-    val date = remember(now) { now.format(DateTimeFormatter.ofPattern("M月d日（E）", Locale.JAPANESE)) }
+    val date = remember(now) { now.format(DateTimeFormatter.ofPattern("M月d日 EEEE", Locale.JAPANESE)) }
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .glass(RoundedCornerShape(28.dp))
+            .padding(vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        Text(time, fontSize = 60.sp, lineHeight = 64.sp, fontWeight = FontWeight.Bold)
-        Text(date, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text(time, style = OnWallpaper, fontSize = 64.sp, lineHeight = 68.sp, fontWeight = FontWeight.SemiBold)
+        Text(date, style = OnWallpaper, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
     }
 }

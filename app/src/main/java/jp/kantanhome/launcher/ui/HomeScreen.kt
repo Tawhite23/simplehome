@@ -1,28 +1,23 @@
-@file:OptIn(ExperimentalFoundationApi::class)
-
 package jp.kantanhome.launcher.ui
 
 import android.appwidget.AppWidgetProviderInfo
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -35,9 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import jp.kantanhome.launcher.data.AppCatalog
@@ -58,19 +52,23 @@ class HomeActions(
     val openChrome: () -> Unit,
 )
 
-/** 移動中のアイコン：どのページの何番目のマスか */
+/** 入れ替え中のアイコン：どのページ（ドック含む）の何番目のマスか */
 private data class Moving(val pageId: Long, val index: Int)
 
 @Composable
 fun HomeScreen(actions: HomeActions, homeSignal: Int) {
-    val pages = HomeStore.pages
+    val context = LocalContext.current
+    val allPages = HomeStore.pages
+    val pages = HomeStore.pagerPages
+    val dock = HomeStore.dock
     val settings = HomeStore.settings
     val apps = AppCatalog.apps
 
     val homeIndex = pages.indexOfFirst { it.kind == PageKind.GRID }.coerceAtLeast(0)
     val mainGridId = pages.firstOrNull { it.kind == PageKind.GRID }?.id
-    val pagerState = rememberPagerState(initialPage = homeIndex) { HomeStore.pages.size }
+    val pagerState = rememberPagerState(initialPage = homeIndex) { HomeStore.pagerPages.size }
     val scope = rememberCoroutineScope()
+    val currentKind = pages.getOrNull(pagerState.currentPage)?.kind
 
     val labels = remember(apps) { apps.associate { it.key to it.label } }
     val labelFor: (HomeItem) -> String = { item ->
@@ -92,14 +90,14 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
     var callTarget by remember { mutableStateOf<HomeItem.Contact?>(null) }
     var showSettings by remember { mutableStateOf(false) }
 
-    // ホームボタン：移動をやめて「ホーム」ページへ
+    // ホームボタン：入れ替えをやめて「ホーム」へ
     LaunchedEffect(homeSignal) {
         if (homeSignal > 0) {
             moving = null
             pagerState.animateScrollToPage(homeIndex)
         }
     }
-    // 戻るボタン：移動中ならやめる。そうでなければ「ホーム」ページへ
+    // 戻るボタン：入れ替え中ならやめる。そうでなければ「ホーム」へ
     BackHandler {
         if (moving != null) moving = null
         else scope.launch { pagerState.animateScrollToPage(homeIndex) }
@@ -112,85 +110,110 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
             else -> actions.launch(item)
         }
     }
+    val onSlotTap: (Long, Int) -> Unit = { pageId, target ->
+        val m = moving
+        if (m != null) {
+            if (!(m.pageId == pageId && m.index == target)) {
+                if (!HomeStore.swapSlots(m.pageId, m.index, pageId, target)) {
+                    Toast.makeText(context, "そこには置けません（同じものがあります）", Toast.LENGTH_SHORT).show()
+                }
+            }
+            moving = null
+        }
+    }
 
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .systemBarsPadding(),
+            .background(wallpaperBrush(settings.wallpaper)),
     ) {
-        moving?.let { m ->
-            val name = pages.find { it.id == m.pageId }?.items?.getOrNull(m.index)?.let(labelFor) ?: ""
-            MovingBanner(name) { moving = null }
-        }
+        // 上下を少しだけ暗くして、白い文字を読みやすくする
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        listOf(Color(0x33000000), Color.Transparent, Color(0x40000000)),
+                    ),
+                ),
+        )
+        Column(
+            Modifier
+                .fillMaxSize()
+                .systemBarsPadding(),
+        ) {
+            moving?.let { m ->
+                val name = allPages.find { it.id == m.pageId }?.items?.getOrNull(m.index)?.let(labelFor) ?: ""
+                MovingBanner(name) { moving = null }
+            }
 
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            key = { HomeStore.pages.getOrNull(it)?.id ?: it },
-        ) { index ->
-            val page = pages.getOrNull(index) ?: return@HorizontalPager
-            when (page.kind) {
-                PageKind.GRID -> GridPage(
-                    page = page,
-                    showClock = page.id == mainGridId,
-                    columns = settings.columns,
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                key = { HomeStore.pagerPages.getOrNull(it)?.id ?: it },
+            ) { index ->
+                val page = pages.getOrNull(index) ?: return@HorizontalPager
+                when (page.kind) {
+                    PageKind.GRID -> GridPage(
+                        page = page,
+                        showClock = page.id == mainGridId,
+                        columns = settings.columns,
+                        labelFor = labelFor,
+                        movingIndex = moving?.takeIf { it.pageId == page.id }?.index,
+                        isMoving = moving != null,
+                        onClick = onItemClick,
+                        onLongClick = { menuFor = page.id to it },
+                        onSlotTap = { onSlotTap(page.id, it) },
+                        onAdd = { addChooserFor = page.id },
+                    )
+
+                    PageKind.WIDGETS -> WidgetsPage(
+                        page = page,
+                        onMenu = { menuFor = page.id to it },
+                        onAdd = { widgetPickerFor = page.id },
+                    )
+
+                    PageKind.ALL_APPS -> AllAppsPage(
+                        apps = apps,
+                        onLaunch = { actions.launch(it.toItem()) },
+                        onLongClick = { addToHome = it },
+                        onSettings = { showSettings = true },
+                    )
+
+                    PageKind.DOCK -> Unit
+                }
+            }
+
+            PageDots(pages.size, pagerState.currentPage) { i ->
+                scope.launch { pagerState.animateScrollToPage(i) }
+            }
+
+            if (dock != null && currentKind == PageKind.GRID) {
+                Dock(
+                    page = dock,
                     labelFor = labelFor,
-                    movingIndex = moving?.takeIf { it.pageId == page.id }?.index,
+                    movingIndex = moving?.takeIf { it.pageId == dock.id }?.index,
                     isMoving = moving != null,
                     onClick = onItemClick,
-                    onLongClick = { menuFor = page.id to it },
-                    onSlotTap = { target ->
-                        val m = moving
-                        if (m != null) {
-                            if (!(m.pageId == page.id && m.index == target)) {
-                                HomeStore.swapSlots(m.pageId, m.index, page.id, target)
-                            }
-                            moving = null
-                        }
-                    },
-                    onAdd = { addChooserFor = page.id },
-                )
-
-                PageKind.CONTACTS -> ContactsPage(
-                    page = page,
-                    onClick = { callTarget = it },
-                    onLongClick = { menuFor = page.id to it },
-                    onAdd = { actions.pickContact(page.id) },
-                )
-
-                PageKind.WIDGETS -> WidgetsPage(
-                    page = page,
-                    onMenu = { menuFor = page.id to it },
-                    onAdd = { widgetPickerFor = page.id },
-                )
-
-                PageKind.ALL_APPS -> AllAppsPage(
-                    apps = apps,
-                    onLaunch = { actions.launch(it.toItem()) },
-                    onLongClick = { addToHome = it },
-                    onSettings = { showSettings = true },
+                    onLongClick = { menuFor = dock.id to it },
+                    onSlotTap = { onSlotTap(dock.id, it) },
+                    onAdd = { addChooserFor = dock.id },
                 )
             }
-        }
-
-        PageTabs(pages.map { it.title }, pagerState.currentPage) { i ->
-            scope.launch { pagerState.animateScrollToPage(i) }
         }
     }
 
     // ---------------- ダイアログ ----------------
 
     menuFor?.let { (pageId, item) ->
-        val page = pages.find { it.id == pageId }
+        val page = allPages.find { it.id == pageId }
         if (page != null) {
             ItemMenuDialog(
                 page = page,
                 item = item,
                 label = labelFor(item),
-                pages = pages,
                 onStartMove = { index -> moving = Moving(page.id, index) },
                 onDismiss = { menuFor = null },
             )
@@ -198,7 +221,9 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
     }
 
     addChooserFor?.let { pageId ->
+        val isDock = pageId == dock?.id
         AddChooserDialog(
+            showWeb = !isDock,
             onApp = { addChooserFor = null; appPickerFor = pageId },
             onContact = { addChooserFor = null; actions.pickContact(pageId) },
             onWeb = { addChooserFor = null; showWebHelp = true },
@@ -207,11 +232,16 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
     }
 
     appPickerFor?.let { pageId ->
-        val existing = pages.find { it.id == pageId }?.filled.orEmpty().map { it.key }.toSet()
+        val existing = allPages.find { it.id == pageId }?.filled.orEmpty().map { it.key }.toSet()
         AppPickerDialog(
             apps = apps,
             existing = existing,
-            onPick = { HomeStore.addItem(pageId, it.toItem()) },
+            onPick = {
+                if (!HomeStore.addItem(pageId, it.toItem())) {
+                    Toast.makeText(context, "いっぱいです。どれかを外してください", Toast.LENGTH_SHORT).show()
+                    appPickerFor = null
+                }
+            },
             onDismiss = { appPickerFor = null },
         )
     }
@@ -231,7 +261,8 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
     }
 
     addToHome?.let { entry ->
-        AddToHomeDialog(entry, pages.filter { it.kind == PageKind.GRID }) { addToHome = null }
+        val targets = allPages.filter { it.kind == PageKind.GRID } + listOfNotNull(dock)
+        AddToHomeDialog(entry, targets) { addToHome = null }
     }
 
     callTarget?.let { c ->
@@ -248,56 +279,49 @@ private fun MovingBanner(name: String, onCancel: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFFFFF3C4))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .glass(RoundedCornerShape(22.dp), 0.32f)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "「$name」を動かします。\n動かしたい先のマスを押してください",
+            "「$name」を入れかえます。\n動かしたい先を押してください",
+            style = OnWallpaper,
             fontSize = 17.sp,
-            fontWeight = FontWeight.Bold,
+            fontWeight = FontWeight.SemiBold,
             lineHeight = 23.sp,
             modifier = Modifier.weight(1f),
         )
-        SmallChip("やめる", onClick = onCancel)
+        GlassChip("やめる", onClick = onCancel)
     }
 }
 
-/** 画面下のページ切り替え。スワイプが苦手でも押すだけで移れる。 */
+/** iPhone のページの点。点を押してもそのページへ移れる（押しやすいよう当たり判定は大きめ）。 */
 @Composable
-private fun PageTabs(titles: List<String>, current: Int, onSelect: (Int) -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    val scroll = rememberScrollState()
-    val fits = titles.size <= 4
-    val rowModifier = Modifier
-        .fillMaxWidth()
-        .background(scheme.surface)
-        .padding(6.dp)
-    Row(
-        if (fits) rowModifier else rowModifier.horizontalScroll(scroll),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        titles.forEachIndexed { i, title ->
-            val selected = i == current
-            val size = if (fits) Modifier.weight(1f) else Modifier.widthIn(min = 96.dp)
-            Box(
-                size
-                    .height(60.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(if (selected) scheme.primary else scheme.surfaceVariant)
-                    .clickable { onSelect(i) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    title,
-                    color = if (selected) scheme.onPrimary else scheme.onSurface,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 6.dp),
-                )
+private fun PageDots(count: Int, current: Int, onSelect: (Int) -> Unit) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier
+                .padding(vertical = 4.dp)
+                .glass(RoundedCornerShape(50), 0.18f)
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            repeat(count) { i ->
+                Box(
+                    Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable { onSelect(i) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier
+                            .size(if (i == current) 11.dp else 9.dp)
+                            .background(Color.White.copy(alpha = if (i == current) 1f else 0.45f), CircleShape),
+                    )
+                }
             }
         }
     }
