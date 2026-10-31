@@ -137,7 +137,18 @@ fun Avatar(name: String, size: Dp) =
 @Composable
 fun TextIcon(text: String, colorIndex: Int, size: Dp, shape: Shape) {
     val colors = IconColors[colorIndex.mod(IconColors.size)]
-    val textSize = with(LocalDensity.current) { (size * if (text.length > 1) 0.34f else 0.44f).toSp() }
+    // 4文字以上は2行に分けて、文字数に合わせて大きさを変える（最大6文字）
+    val n = text.length
+    val shown = if (n >= 4) text.substring(0, (n + 1) / 2) + "\n" + text.substring((n + 1) / 2) else text
+    val ratio = when {
+        n <= 1 -> 0.44f
+        n == 2 -> 0.34f
+        n == 3 -> 0.26f
+        n == 4 -> 0.29f
+        else -> 0.23f
+    }
+    val textSize = with(LocalDensity.current) { (size * ratio).toSp() }
+    val lineHeight = with(LocalDensity.current) { (size * ratio * 1.15f).toSp() }
     Box(
         Modifier
             .size(size)
@@ -145,7 +156,15 @@ fun TextIcon(text: String, colorIndex: Int, size: Dp, shape: Shape) {
             .background(Brush.verticalGradient(colors), shape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = Color.White, fontSize = textSize, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(
+            shown,
+            color = Color.White,
+            fontSize = textSize,
+            lineHeight = lineHeight,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+        )
     }
 }
 

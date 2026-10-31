@@ -105,15 +105,15 @@ fun IconEditDialog(item: HomeItem, defaultLabel: String, onDismiss: () -> Unit) 
         }
         SubButton("色と文字でつくる") {
             editingText = true
-            if (textIcon == null) textIcon = label.ifBlank { defaultLabel }.take(1)
+            if (textIcon == null) textIcon = label.ifBlank { defaultLabel }.take(4)
             iconFile = null
         }
 
         if (editingText && textIcon != null) {
             OutlinedTextField(
                 value = textIcon.orEmpty(),
-                onValueChange = { textIcon = it.take(2) },
-                label = { Text("アイコンの文字（2文字まで）") },
+                onValueChange = { textIcon = it.replace("\n", "").take(6) },
+                label = { Text("アイコンの文字（6文字まで）") },
                 singleLine = true,
                 textStyle = TextStyle(fontSize = 22.sp, textAlign = TextAlign.Center),
                 modifier = Modifier.fillMaxWidth(),

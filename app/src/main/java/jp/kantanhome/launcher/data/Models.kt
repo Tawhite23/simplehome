@@ -76,7 +76,7 @@ data class HomeSettings(
 /**
  * アイテムごとの見た目の変更。null の項目は元のまま。
  * @param iconFile filesDir 内の写真アイコン（icons/xxx.png）
- * @param textIcon 色と文字で作ったアイコンの文字（1〜2文字）
+ * @param textIcon 色と文字で作ったアイコンの文字（1〜6文字、4文字以上は2行）
  * @param shape 形をそろえるか（null = 全体の設定に従う）
  */
 data class ItemStyle(
