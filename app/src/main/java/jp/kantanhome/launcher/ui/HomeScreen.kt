@@ -158,7 +158,8 @@ fun HomeScreen(actions: HomeActions, homeSignal: Int) {
                 when (page.kind) {
                     PageKind.GRID -> GridPage(
                         page = page,
-                        showClock = page.id == mainGridId,
+                        // 入れ替え中は時計を隠して、マスを広く見せる
+                        showClock = page.id == mainGridId && moving == null,
                         columns = settings.columns,
                         labelFor = labelFor,
                         movingIndex = moving?.takeIf { it.pageId == page.id }?.index,
@@ -285,7 +286,7 @@ private fun MovingBanner(name: String, onCancel: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "「$name」を入れかえます。\n動かしたい先を押してください",
+            "「$name」の\n行き先を押してください",
             style = OnWallpaper,
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
