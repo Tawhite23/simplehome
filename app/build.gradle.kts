@@ -16,9 +16,27 @@ android {
         versionName = "1.2"
     }
 
+    // ビルドのたびに署名が変わると上書きインストールできないので、固定の鍵で署名する。
+    // 鍵はリポジトリには入れず、GitHub Actions のシークレットから渡す（ワークフロー参照）。
+    // 環境変数がないとき（手元のビルドなど）は通常のデバッグ署名になる。
+    val keystorePath = System.getenv("SIGNING_KEYSTORE_PATH")
+    val keystorePassword = System.getenv("SIGNING_PASSWORD")
+    val fixedSigning = if (!keystorePath.isNullOrBlank() && !keystorePassword.isNullOrBlank()) {
+        signingConfigs.create("fixed") {
+            storeFile = file(keystorePath)
+            storePassword = keystorePassword
+            keyAlias = "kantanhome"
+            keyPassword = keystorePassword
+        }
+    } else null
+
     buildTypes {
+        debug {
+            if (fixedSigning != null) signingConfig = fixedSigning
+        }
         release {
             isMinifyEnabled = false
+            if (fixedSigning != null) signingConfig = fixedSigning
         }
     }
     compileOptions {

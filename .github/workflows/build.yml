@@ -14,10 +14,26 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
+
+      # 署名の鍵をシークレットから取り出す（毎回同じ署名にして上書きインストールできるように）
+      - name: Prepare signing key
+        env:
+          SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$SIGNING_KEYSTORE_B64" ]; then
+            echo "$SIGNING_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/kantanhome.keystore"
+            echo "SIGNING_KEYSTORE_PATH=$RUNNER_TEMP/kantanhome.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::SIGNING_KEYSTORE_B64 がないので、毎回ちがう署名になります（上書きインストール不可）"
+          fi
+
       - name: Build debug APK
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
+
       - uses: actions/upload-artifact@v4
         with:
           name: kantanhome-debug-apk
