@@ -80,7 +80,7 @@ fun ContactsPage(
                 Avatar(c.name, 64.dp)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(c.name, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(c.name, fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(c.number, fontSize = 17.sp, color = SubText)
                 }
                 Spacer(Modifier.width(8.dp))
